@@ -21,6 +21,8 @@ Edit:
  It is currently finished, but there might be errors that need fixing, or things that get ironed 
  out in the future.
  
+ You might need to change the makefile to suit your compiler.
+ 
  Currently supported:
   Placing and moving of stones.
   Official rules with all official board sizes.

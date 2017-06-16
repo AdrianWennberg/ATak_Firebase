@@ -3,7 +3,7 @@
 using namespace std;
 
 template<typename T> 
-Vector2d<T>::Vector2d(int pRows, int pColumns): mRows(pRows), mColumns(pColumns), mField(pRows * pColumns) { }
+Vector2d<T>::Vector2d(int pRows, int pColumns) : mRows(pRows), mColumns(pColumns), mField(pRows * pColumns) { };
     
 template<typename T> 
 void Vector2d<T>::setPosition(int pRow, int pColumn, int value)
@@ -28,4 +28,4 @@ int Vector2d<T>::getFieldSize()
 
 
 template<typename T> 
-SquareVector<T>::SquareVector(int size): Vector2d<T>(size, size) { }
+SquareVector<T>::SquareVector(int size) : Vector2d<T>(size, size) { };
