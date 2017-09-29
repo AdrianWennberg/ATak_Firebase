@@ -1,165 +1,161 @@
-﻿using System.Collections;
+﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
+public enum StoneType { Flat, Standing, Capstone };
+
+public enum GameState
+{
+    NULL_STATE = 0,
+    OPPONENTS_TURN,
+    TURN_START,
+    PICKUP,
+    PLACE_STONE,
+    GAME_END,
+};
+
 public class BoardManager : MonoBehaviour
 {
-    public static BoardHighlights Instance { get; set; }
+    public static BoardManager Instance { get; protected set; }
 
-    private bool gameOver;
     
-    public enum StoneType { Flat, Standing, Capstone };
 
-    public GameObject takPlane;
-    public GameObject highlightPrefab;
+    private Dictionary<GameState, Action> StateMachiene;
+
+    public GameState CurrentGameState { get; protected set; }
+    
+    public bool IsWhite { get; protected set; }
+    
+    public GameObject boardPiece;
     public GameObject moveController;
-    public GameObject toggleStoneType;
-
 
     public List<GameObject> Pieces;
-    private Player[] players;
-    public GameObject[] playerDisplay;
+    public Player[] players;
     public GameObject victoryScreen;
-
-    private GameObject highlightObject;
-
-
-    private int selectionX = -1;
-    private int selectionY = -1;
+    
+    
     private bool isWhiteTurn = true;
-    private bool firstTurn = true;
-    private StoneType currentStone;
+    public bool FirstTurn { get; protected set; }
+    [NonSerialized] public StoneType currentStone;
 
     private List<Stone>[,] activeStones;
     private List<Stone> selectedStones = new List<Stone>();
-    private List<Stone> movingStones;
+    private List<Stone> movingStones = new List<Stone>();
 
     private bool[,] allowedMoves;
 
-    private int[] moveStart;
-    private int[] currentPosition;
+    private BoardPosition moveStart;
+    private BoardPosition currentPosition;
     private int pickedupStones = 0;
 
     private int selectionHeight = -1;
 
+    private List<Char> moveString = new List<char>();
+
+    private void Awake()
+    {
+        if (Instance == null)
+            Instance = this;
+        else
+            Destroy(gameObject);
+    }
+
     void Start()
     {
-        PreparePlayers();
-        allowedMoves = new bool[GameManager.Instance.boardSize, GameManager.Instance.boardSize];
-        moveStart = new int[2];
-        ResetCurrentStone();
+
+        if (Client.Instance)
+            IsWhite = Client.Instance.isWhite;
+        else
+            IsWhite = true;
+
+        CurrentGameState = IsWhite ? GameState.TURN_START : GameState.OPPONENTS_TURN;
+       
+        allowedMoves = new bool[GameManager.Instance.BoardSize, GameManager.Instance.BoardSize];
+        moveStart = MouseController.GetInvalidPosition();
+        FirstTurn = true;
+
+        currentStone = StoneType.Flat;
+        SetupGameStates();
         PrepareActiveStones();
-        PlaceTakPlane();
-        CreateHighlight();
+        CreateBoard();
     }
 
-
-
-    // Update is called once per frame
     void Update()
     {
-        DrawTakBoard();
-        if (!gameOver)
-        {
-            if (!moveController.activeSelf)
-            {
-                UpdateBoardSelection();
-                HighlightSlot();
-                UserSelection();
-            }
-            else if (pickedupStones == 0)
-            {
-                UpdateStoneSelection();
-                PickUpStones();
-            }
-            else
-            {
-                UpdateBoardSelection();
-                PlaceStone();
-            }
-        }
+        //DrawTakBoard();
+        if (CurrentGameState != GameState.GAME_END && CurrentGameState != GameState.OPPONENTS_TURN)
+            StateMachiene[CurrentGameState]();
     }
 
-    private void PreparePlayers()
+    public Stone GetTopStone(BoardPosition pos)
     {
-        players = new Player[2];
-        players[0] = new Player("Player 1", GameManager.Instance.boardSize);
-        players[1] = new Player("Player 2", GameManager.Instance.boardSize);
-        for (int i = 0; i < 2; i++)
-        {
-            playerDisplay[i].GetComponent<Text>().text = players[i].GetName();
-            playerDisplay[i].transform.GetChild(0).GetComponent<Text>().text = "Stones : " + players[i].GetStonesLeft().ToString();
-            playerDisplay[i].transform.GetChild(1).GetComponent<Text>().text = "Captones : " + players[i].GetCapstonesLeft().ToString();
-        }
+        if (activeStones[pos.x, pos.y].Count == 0)
+            return null;
+
+        return activeStones[pos.x, pos.y][activeStones[pos.x, pos.y].Count - 1];
     }
 
-    //
+    private void AddStateAction(GameState state, Action action)
+    {
+        if (StateMachiene.ContainsKey(state))
+            StateMachiene[state] += action;
+        else
+            StateMachiene.Add(state, action);
+    }
+
+    private void SetupGameStates()
+    { 
+        StateMachiene = new Dictionary<GameState, Action>();
+
+        AddStateAction(GameState.NULL_STATE, () => { Debug.LogError("Null state: This should never happen"); });
+        AddStateAction(GameState.TURN_START, MouseController.UpdateMousePosition);
+        AddStateAction(GameState.TURN_START, HighlightController.Instance.HiglightMousePosition);
+        AddStateAction(GameState.TURN_START, UserSelection);
+        AddStateAction(GameState.PICKUP, UpdateStoneSelection);
+        AddStateAction(GameState.PICKUP, PickUpStones);
+        AddStateAction(GameState.PLACE_STONE, MouseController.UpdateMousePosition);
+        AddStateAction(GameState.PLACE_STONE, PlaceStone);
+    }
     private void PrepareActiveStones()
     {
-        activeStones = new List<Stone>[GameManager.Instance.boardSize, GameManager.Instance.boardSize];
-        for (int i = 0; i < GameManager.Instance.boardSize; i++)
+        activeStones = new List<Stone>[GameManager.Instance.BoardSize, GameManager.Instance.BoardSize];
+        for (int i = 0; i < GameManager.Instance.BoardSize; i++)
         {
-            for (int j = 0; j < GameManager.Instance.boardSize; j++)
+            for (int j = 0; j < GameManager.Instance.BoardSize; j++)
             {
                 activeStones[i, j] = new List<Stone>();
             }
         }
     }
-    //
-    private void PlaceTakPlane()
+    private void CreateBoard()
     {
-        GameObject go = Instantiate(takPlane,
-            transform.position + Vector3.forward * (GameManager.Instance.boardSize * GameManager.Instance.slotSize / 2.0f) + Vector3.right * (GameManager.Instance.boardSize * GameManager.Instance.slotSize / 2.0f),
-            Quaternion.identity, transform);
-        go.transform.localScale *= GameManager.Instance.slotSize;
-    }
-    //
-    private void CreateHighlight()
-    {
-        highlightObject = Instantiate(highlightPrefab, transform.position, Quaternion.identity, transform) as GameObject;
-        highlightObject.transform.localScale = highlightPrefab.transform.localScale * GameManager.Instance.slotSize;
-        highlightObject.SetActive(false);
-    }
+        GameObject board = Instantiate(new GameObject(), new Vector3(), Quaternion.identity, transform);
 
-    //
-    private void UpdateBoardSelection()
-    {
-        if (!Camera.main)
+        for (int i = 0; i < GameManager.Instance.BoardSize; i++)
         {
-            return;
-        }
-
-        RaycastHit hit;
-        if (Physics.Raycast(Camera.main.ScreenPointToRay(Input.mousePosition), out hit, 25.0f, LayerMask.GetMask("TakBoard")))
-        {
-            selectionX = (int)(hit.point.x / GameManager.Instance.slotSize);
-            selectionY = (int)(hit.point.z / GameManager.Instance.slotSize);
-        }
-        else
-        {
-            selectionY = -1;
-            selectionX = -1;
+            for (int j = 0; j < GameManager.Instance.BoardSize; j++)
+            {
+                Instantiate(boardPiece, new Vector3(i + 0.5f, 0, j + 0.5f), Quaternion.identity, board.transform);
+            }
         }
     }
-    //
     private void UpdateStoneSelection()
     {
         if (!Camera.main)
-        {
             return;
-        }
 
         RaycastHit hit;
         if (Physics.Raycast(Camera.main.ScreenPointToRay(Input.mousePosition), out hit, 25.0f, LayerMask.GetMask("TakStone")))
         {
             Stone go = hit.transform.gameObject.GetComponent<Stone>();
-            if(go.CurrentX == moveStart[0] && go.CurrentY == moveStart[1])
+            if (go.Position.Equals(moveStart))
             {
-                Stone topStone = activeStones[moveStart[0], moveStart[1]][activeStones[moveStart[0], moveStart[1]].Count - 1].GetComponent<Stone>();
+                Stone topStone = GetTopStone(moveStart).GetComponent<Stone>();
                 selectionHeight = topStone.Height - go.Height;
-                if (selectionHeight >= GameManager.Instance.boardSize)
-                    selectionHeight = GameManager.Instance.boardSize - 1;
+                if (selectionHeight >= GameManager.Instance.BoardSize)
+                    selectionHeight = GameManager.Instance.BoardSize - 1;
             }
         }
         else
@@ -167,465 +163,499 @@ public class BoardManager : MonoBehaviour
             selectionHeight = -1;
         }
     }
-    //
-    private void DrawTakBoard()
-    {
 
-        Vector3 widthLine = Vector3.right * GameManager.Instance.boardSize * GameManager.Instance.slotSize;
-        Vector3 heightLine = Vector3.forward * GameManager.Instance.boardSize * GameManager.Instance.slotSize;
-
-        for (int i = 0; i <= GameManager.Instance.boardSize; i++)
-        {
-            Vector3 start = Vector3.forward * i * GameManager.Instance.slotSize;
-            Debug.DrawLine(start, start + widthLine);
-
-            start = Vector3.right * i * GameManager.Instance.slotSize;
-            Debug.DrawLine(start, start + heightLine);
-        }
-    }
-    //
-    private void HighlightSlot()
-    {
-        
-        if (selectionX >= 0 && selectionY >= 0)
-        {
-            List<Stone> positionStones = new List<Stone>(activeStones[selectionX, selectionY]);
-            if (positionStones.Count == 0 || 
-                positionStones[positionStones.Count - 1].isWhite == isWhiteTurn)
-            {
-                highlightObject.transform.position = new Vector3(
-                    selectionX * GameManager.Instance.slotSize + (GameManager.Instance.slotSize / 2.0f), 0,
-                    selectionY * GameManager.Instance.slotSize + (GameManager.Instance.slotSize / 2.0f));
-
-                highlightObject.SetActive(true);
-            }
-        }
-        else
-        {
-            highlightObject.SetActive(false);
-        }
-    }
-    
-
-    //
     private void UserSelection()
     {
+
+        if (MouseController.IsValidPosition() == false)
+            return;
+
         if (Input.GetMouseButtonDown(0))
         {
-            if (selectionX >= 0 && selectionY >= 0)
+            if (GetTopStone(MouseController.CurrentPosition) == null)
             {
-                if (activeStones[selectionX, selectionY].Count == 0)
+                if (FirstTurn)
                 {
-                    if (!(currentStone == StoneType.Capstone) || players[isWhiteTurn ? 0 : 1].HasCapstone())
-                    {
-                        if (firstTurn)
-                            SpawnFirstStone();
-                        else
-                            SpawnStone();
-                        NextTurn();
-                    }
+                    SpawnFirstStone();
+                    FirstTurn = FirstTurn && isWhiteTurn;
                 }
-                else if(!firstTurn)
-                {
-                    SelectStones();
-                }
+                else
+                    SpawnStone();
+                if(Client.Instance)
+                    SendSpawnStone();
+                NextTurn();
+            }
+            else
+            {
+                SetMovePosition();
             }
         }
     }
-    //
-    private void SelectStones()
+
+    private void SpawnStone()
     {
-        if (activeStones[selectionX, selectionY][activeStones[selectionX, selectionY].Count - 1].isWhite != isWhiteTurn)
-        {
-            selectedStones.Clear();
+        int index = isWhiteTurn ? 0 : 1;
+        int capstoneOffset = (currentStone == StoneType.Capstone ? 2 : 0);
+
+        GameObject go = Instantiate(Pieces[index + capstoneOffset],
+            transform.position,
+            Quaternion.identity, transform) as GameObject;
+
+        activeStones[MouseController.CurrentPosition.x, MouseController.CurrentPosition.y].Add(
+            Stone.AddStone(go, MouseController.CurrentPosition, isWhiteTurn, currentStone));
+
+        if (currentStone == StoneType.Capstone)
+            players[index].TakeCapstone();
+        else
+            players[index].TakeStone();
+    }
+    private void SpawnFirstStone()
+    {
+        int index = isWhiteTurn ? 1 : 0;
+
+        GameObject go = Instantiate(Pieces[index],
+            transform.position,
+            Quaternion.identity, transform) as GameObject;
+
+        activeStones[MouseController.CurrentPosition.x, MouseController.CurrentPosition.y].Add(
+            Stone.AddStone(go, MouseController.CurrentPosition, !isWhiteTurn));
+
+        players[index].TakeStone();
+    }
+    
+    private void SetMovePosition()
+    {
+        if (FirstTurn || GetTopStone(MouseController.CurrentPosition).isWhite != IsWhite)
             return;
-        }
 
-        SetMovePosition(selectionX, selectionY);
-
-    }
-
-    //
-    public void SetMovePosition(int x, int y)
-    {
-        moveStart[0] = x;
-        moveStart[1] = y;
-        currentPosition = new int[] { moveStart[0], moveStart[1] };
+        moveStart = MouseController.CurrentPosition;
+        currentPosition = moveStart;
         moveController.SetActive(true);
+        CurrentGameState = GameState.PICKUP;
     }
-
-    //
-    public void ResetMovePosition()
+    private void ResetMovePosition()
     {
-        moveStart[0] = -1;
-        moveStart[1] = -1;
-        currentPosition = new int[] { moveStart[0], moveStart[1] };
+        pickedupStones = 0;
+        selectedStones.Clear();
+        movingStones.Clear();
+        moveStart = MouseController.GetInvalidPosition();
+        currentPosition = moveStart;
         moveController.SetActive(false);
     }
-
-    //
     private void PickUpStones()
     {
-        if (activeStones[moveStart[0], moveStart[1]].Count == 1)
+        if (activeStones[moveStart.x, moveStart.y].Count == 1)
         {
             // moving one stone
-            selectedStones = new List<Stone>(activeStones[moveStart[0], moveStart[1]]);
-            activeStones[moveStart[0], moveStart[1]].Clear();
+            selectedStones = new List<Stone>(activeStones[moveStart.x, moveStart.y]);
+            activeStones[moveStart.x, moveStart.y].Clear();
 
             selectedStones[0].transform.localPosition += new Vector3(0, 0.4f, 0) * 4;
             pickedupStones = 1;
-            
-            SetAllowedMoves();
-            BoardHighlights.Instance.HighlightAllowedMoves(allowedMoves, GameManager.Instance.boardSize, GameManager.Instance.slotSize);
 
-            highlightObject.SetActive(false);
+            movingStones = new List<Stone>(selectedStones);
+
+            SetAllowedMoves();
+            HighlightController.Instance.HighlightAllowedMoves(allowedMoves, GameManager.Instance.BoardSize);
+
+            CurrentGameState = GameState.PLACE_STONE;
         }
         else if (Input.GetMouseButtonDown(0))
         {
-            int stackHeight = activeStones[moveStart[0], moveStart[1]].Count;
-            //moving multiple stones
+            int stackHeight = activeStones[moveStart.x, moveStart.y].Count;
+            // moving multiple stones
             if (selectionHeight != -1)
             {
-                selectedStones = activeStones[moveStart[0], moveStart[1]].GetRange(stackHeight - selectionHeight - 1, selectionHeight + 1);
-
+                selectedStones = activeStones[moveStart.x, moveStart.y].GetRange(stackHeight - selectionHeight - 1, selectionHeight + 1);
+                movingStones = new List<Stone>(selectedStones);
                 pickedupStones = 0;
                 foreach (Stone selected in selectedStones)
                 {
-                    activeStones[moveStart[0], moveStart[1]].Remove(selected);
-                    selectedStones[pickedupStones].transform.localPosition += new Vector3(0, 0.4f, 0) *  4;
+                    activeStones[moveStart.x, moveStart.y].Remove(selected);
+                    selectedStones[pickedupStones].transform.localPosition += new Vector3(0, 0.4f, 0) * 4;
                     pickedupStones++;
                 }
                 SetAllowedMoves();
-                BoardHighlights.Instance.HighlightAllowedMoves(allowedMoves, GameManager.Instance.boardSize, GameManager.Instance.slotSize);
-                highlightObject.SetActive(false);
+                HighlightController.Instance.HighlightAllowedMoves(allowedMoves, GameManager.Instance.BoardSize);
+
+                moveString.Add((char)(selectionHeight + '1'));
+
+                CurrentGameState = GameState.PLACE_STONE;
             }
         }
 
-        if(pickedupStones > 0)
+        if (Client.Instance && pickedupStones > 0)
         {
             movingStones = new List<Stone>(selectedStones);
+            moveString.Add((char)(moveStart.x + 'a'));
+            moveString.Add((char)(moveStart.y + '1'));
         }
     }
-    //
     public void CancelMove()
     {
         foreach (Stone selected in movingStones)
         {
-            for (int i = 0; i < GameManager.Instance.boardSize; i++)
+            for (int i = 0; i < GameManager.Instance.BoardSize; i++)
             {
-                for (int j = 0; j < GameManager.Instance.boardSize; j++)
+                for (int j = 0; j < GameManager.Instance.BoardSize; j++)
                 {
                     activeStones[i, j].Remove(selected);
                 }
             }
-            selected.transform.position = GetSlotCenter(moveStart[0], moveStart[1]) +
-                    new Vector3(0, 0.2f, 0) * (2 * activeStones[moveStart[0], moveStart[1]].Count);
-            OffsetStonePosition(selected.gameObject);
-            activeStones[moveStart[0], moveStart[1]].Add(selected);
-
+            selected.SetPosition(moveStart, activeStones[moveStart.x, moveStart.y].Count);
+            activeStones[moveStart.x, moveStart.y].Add(selected);
         }
-        pickedupStones = 0;
-        movingStones.Clear();
-        selectedStones.Clear();
         ResetMovePosition();
 
-        BoardHighlights.Instance.HideHighlights();
+        HighlightController.Instance.HideHighlights();
 
-        moveStart[0] = -1;
-        moveStart[1] = -1;
-        currentPosition = new int[] { moveStart[0], moveStart[1] };
+        moveStart = MouseController.GetInvalidPosition();
+        currentPosition = moveStart;
+        moveString = new List<char>();
+        
+        CurrentGameState = GameState.TURN_START;
     }
-    //
     private void SetAllowedMoves()
     {
-        allowedMoves = new bool[GameManager.Instance.boardSize, GameManager.Instance.boardSize];
-        if(currentPosition[0] == moveStart[0] && currentPosition[1] == moveStart[1])
+        allowedMoves = new bool[GameManager.Instance.BoardSize, GameManager.Instance.BoardSize];
+        if (currentPosition.Equals(moveStart) || !GameManager.Instance.OfficialRules)
         {
-            if(moveStart[0] - 1 >= 0)
-                allowedMoves[moveStart[0] - 1, moveStart[1]] = CheckStoneTypes(currentPosition[0] - 1, currentPosition[1]);
+            if (currentPosition.x > 0)
+                allowedMoves[currentPosition.x - 1, currentPosition.y] = CheckStoneTypes(currentPosition.x - 1, currentPosition.y);
 
-            if (moveStart[1] - 1 >= 0)
-                allowedMoves[moveStart[0], moveStart[1] - 1] = CheckStoneTypes(currentPosition[0], currentPosition[1] - 1);
+            if (currentPosition.y > 0)
+                allowedMoves[currentPosition.x, currentPosition.y - 1] = CheckStoneTypes(currentPosition.x, currentPosition.y - 1);
 
-            if (moveStart[0] + 1 < GameManager.Instance.boardSize)
-                allowedMoves[moveStart[0] + 1, moveStart[1]] = CheckStoneTypes(currentPosition[0] + 1, currentPosition[1]);
+            if (currentPosition.x < GameManager.Instance.BoardSize - 1)
+                allowedMoves[currentPosition.x + 1, currentPosition.y] = CheckStoneTypes(currentPosition.x + 1, currentPosition.y);
 
-            if (moveStart[1] + 1 < GameManager.Instance.boardSize)
-                allowedMoves[moveStart[0], moveStart[1] + 1] = CheckStoneTypes(currentPosition[0], currentPosition[1] + 1);
+            if (currentPosition.y < GameManager.Instance.BoardSize - 1)
+                allowedMoves[currentPosition.x, currentPosition.y + 1] = CheckStoneTypes(currentPosition.x, currentPosition.y + 1);
+
+            if (!(selectedStones.Count == movingStones.Count))
+                allowedMoves[currentPosition.x, currentPosition.y] = true;
         }
         else
         {
-            allowedMoves[currentPosition[0], currentPosition[1]] = true;
+            allowedMoves[currentPosition.x, currentPosition.y] = true;
 
-            if (moveStart[0] > currentPosition[0] && currentPosition[0] > 0) // Left
+            if (moveStart.x > currentPosition.x && currentPosition.x > 0) // Left
             {
-                allowedMoves[currentPosition[0] - 1, currentPosition[1]] = CheckStoneTypes(currentPosition[0] - 1, currentPosition[1]);
+                allowedMoves[currentPosition.x - 1, currentPosition.y] = CheckStoneTypes(currentPosition.x - 1, currentPosition.y);
             }
-            else if (moveStart[0] < currentPosition[0] && currentPosition[0] < GameManager.Instance.boardSize - 1) // Right
+            else if (moveStart.x < currentPosition.x && currentPosition.x < GameManager.Instance.BoardSize - 1) // Right
             {
-                allowedMoves[currentPosition[0] + 1, currentPosition[1]] = CheckStoneTypes(currentPosition[0] + 1, currentPosition[1]);
+                allowedMoves[currentPosition.x + 1, currentPosition.y] = CheckStoneTypes(currentPosition.x + 1, currentPosition.y);
             }
-            else if (moveStart[1] > currentPosition[1] && currentPosition[1] > 0) // Down
+            else if (moveStart.y > currentPosition.y && currentPosition.y > 0) // Down
             {
-                allowedMoves[currentPosition[0], currentPosition[1] - 1] = CheckStoneTypes(currentPosition[0], currentPosition[1] - 1);
+                allowedMoves[currentPosition.x, currentPosition.y - 1] = CheckStoneTypes(currentPosition.x, currentPosition.y - 1);
             }
-            else if (moveStart[1] < currentPosition[1] && currentPosition[1] < GameManager.Instance.boardSize - 1) // Up
+            else if (moveStart.y < currentPosition.y && currentPosition.y < GameManager.Instance.BoardSize - 1) // Up
             {
-                allowedMoves[currentPosition[0], currentPosition[1] + 1] = CheckStoneTypes(currentPosition[0], currentPosition[1] + 1);
+                allowedMoves[currentPosition.x, currentPosition.y + 1] = CheckStoneTypes(currentPosition.x, currentPosition.y + 1);
             }
         }
     }
-
     private bool CheckStoneTypes(int x, int y)
     {
         return (activeStones[x, y].Count == 0 ||
-            activeStones[x, y][activeStones[x, y].Count - 1].stoneType == StoneType.Flat ||
-            (activeStones[x, y][activeStones[x, y].Count - 1].stoneType == StoneType.Standing &&
-             selectedStones[0].stoneType == StoneType.Capstone));
+            activeStones[x, y][activeStones[x, y].Count - 1].StoneType == StoneType.Flat ||
+            (activeStones[x, y][activeStones[x, y].Count - 1].StoneType == StoneType.Standing &&
+             selectedStones[0].StoneType == StoneType.Capstone));
     }
-
-    //
     private void PlaceStone()
     {
-        if (Input.GetMouseButtonDown(0) && 
-            selectionX >= 0 && selectionY >= 0 && 
-            allowedMoves[selectionX, selectionY])
+        if (Input.GetMouseButtonDown(0) &&
+            MouseController.IsValidPosition() &&
+            allowedMoves[MouseController.CurrentPosition.x, MouseController.CurrentPosition.y])
         {
-            currentPosition[0] = selectionX;
-            currentPosition[1] = selectionY;
+            BoardPosition pos = MouseController.CurrentPosition;
 
-            selectedStones[0].transform.position = GetSlotCenter(selectionX, selectionY) +
-                new Vector3(0, 0.4f, 0) * activeStones[selectionX, selectionY].Count;
-            OffsetStonePosition(selectedStones[0].gameObject);
+            if (Client.Instance != null)
+            {
+                if (movingStones.Count == pickedupStones)
+                {
+                    char next;
+                    if (pos.x != moveStart.x)
+                        next = pos.x > moveStart.x ? '>' : '<';
+                    else
+                        next = pos.y > moveStart.y ? '+' : '-';
 
-            Flatten();
+                    moveString.Add(next);
+                }
 
-            selectedStones[0].SetPosition(selectionX, selectionY);
-            selectedStones[0].Height = activeStones[selectionX, selectionY].Count;
+                if (MouseController.CurrentPosition.Equals(currentPosition))
+                    moveString[moveString.Count - 1] = (char)(moveString[moveString.Count - 1] + 1);
+                else if (movingStones.Count != 1)
+                    moveString.Add('1');
+            }
 
-            activeStones[selectionX, selectionY].Add(selectedStones[0]);
+            currentPosition = pos;
+
+            selectedStones[0].SetPosition(pos, activeStones[pos.x, pos.y].Count);
+            Flatten(pos);
+
+            activeStones[pos.x, pos.y].Add(selectedStones[0]);
             selectedStones.RemoveAt(0);
             pickedupStones--;
-
-            BoardHighlights.Instance.HideHighlights();
 
 
             if (pickedupStones > 0)
             {
-                int i = 0;
-                foreach (Stone selected in selectedStones)
-                {
-                    selected.transform.position = GetSlotCenter(selectionX, selectionY) +
-                    new Vector3(0, 0.4f, 0) * (i++ + activeStones[selectionX, selectionY].Count + 4);
-                    OffsetStonePosition(selected.gameObject);
-                }
+                for(int i = 0; i < selectedStones.Count; i++)
+                    selectedStones[i].SetPositionFloating(pos, activeStones[pos.x, pos.y].Count, i);
 
                 SetAllowedMoves();
-                BoardHighlights.Instance.HighlightAllowedMoves(allowedMoves, GameManager.Instance.boardSize, GameManager.Instance.slotSize);
+                HighlightController.Instance.HighlightAllowedMoves(allowedMoves, GameManager.Instance.BoardSize);
             }
             else
             {
-                CheckRoadWin();
+                if(Client.Instance)
+                    SendMove();
+
                 NextTurn();
-                ResetMovePosition();
             }
         }
     }
-
-    private void Flatten()
+    private void Flatten(BoardPosition pos)
     {
-        if (activeStones[selectionX, selectionY].Count > 0)
+        Stone Standing = GetTopStone(pos);
+        if (Standing != null && selectedStones.Count == 1)
         {
-            GameObject Capstone = selectedStones[0].gameObject;
-            GameObject Standing = activeStones[selectionX, selectionY][activeStones[selectionX, selectionY].Count - 1].gameObject;
-            if (Capstone.GetComponent<Stone>().stoneType == StoneType.Capstone &&
-                Standing.GetComponent<Stone>().stoneType == StoneType.Standing)
+            if (selectedStones[0].StoneType == StoneType.Capstone &&
+                Standing.StoneType == StoneType.Standing)
             {
-                Standing.transform.position -= new Vector3(0, Standing.GetComponent<Renderer>().bounds.size.y / 2, 0);
-                Standing.transform.rotation = new Quaternion();
-                OffsetStonePosition(Standing);
-                Standing.GetComponent<Stone>().stoneType = StoneType.Flat;
+                Standing.Flatten();
             }
         }
     }
 
-    //
-    private void SpawnStone()
+
+    private void NextTurn()
     {
-        int index = isWhiteTurn ? 0 : 1;
-        GameObject go;
-        int capstoneOffset = (currentStone == StoneType.Capstone ? 2 : 0);
-        
-        go = Instantiate(Pieces[index + capstoneOffset],
-            transform.position,
-            Quaternion.identity, transform) as GameObject;
-        
-        go.transform.position = GetSlotCenter(selectionX, selectionY);
+        ResetMovePosition();
+        CheckWin();
+        if (CurrentGameState == GameState.GAME_END)
+            return;
 
-        if(currentStone == StoneType.Standing)
-            go.transform.Rotate(new Vector3(90, 45, 0));
+        isWhiteTurn = !isWhiteTurn;
+        currentStone = StoneType.Flat;
+        HighlightController.Instance.HideHighlights();
 
-        activeStones[selectionX, selectionY].Add(go.GetComponent<Stone>());
+        foreach (Player p in players)
+            p.SwapColor();
 
-        activeStones[selectionX, selectionY][0].stoneType = (StoneType)currentStone;
-        activeStones[selectionX, selectionY][0].SetPosition(selectionX, selectionY);
-        activeStones[selectionX, selectionY][0].Height = 0;
-
-        OffsetStonePosition(go);
-        highlightObject.SetActive(false);
-
-        if (currentStone == StoneType.Capstone)
+        if (Client.Instance)
         {
-            players[index].TakeCapstone();
-            playerDisplay[index].transform.GetChild(1).GetComponent<Text>().text = "Captones : " + players[index].GetCapstonesLeft().ToString();
-
+            if (isWhiteTurn == IsWhite)
+                CurrentGameState = GameState.TURN_START;
+            else
+                CurrentGameState = GameState.OPPONENTS_TURN;
         }
         else
         {
-            if (!players[index].TakeStone())
-            {
-                FlatWin();
-            }
-            playerDisplay[index].transform.GetChild(0).GetComponent<Text>().text = "Stones : " + players[index].GetStonesLeft().ToString();
+            IsWhite = !IsWhite;
+            CurrentGameState = GameState.TURN_START;
         }
-        CheckRoadWin();
-    }   
-
-    private void SpawnFirstStone()
+    }
+    
+    private void CheckWin()
     {
-        GameObject go;
-        int index = isWhiteTurn ? 1 : 0;
-
-        go = Instantiate(Pieces[index],
-            transform.position,
-            Quaternion.identity, transform) as GameObject;
-
-        go.transform.position = GetSlotCenter(selectionX, selectionY);
+        bool whiteWin = false;
+        bool blackWin = false;
         
-        activeStones[selectionX, selectionY].Add(go.GetComponent<Stone>());
-
-        activeStones[selectionX, selectionY][0].stoneType = StoneType.Flat;
-        activeStones[selectionX, selectionY][0].SetPosition(selectionX, selectionY);
-        activeStones[selectionX, selectionY][0].Height = 0;
-
-        OffsetStonePosition(go);
-        highlightObject.SetActive(false);
-
-        players[index].TakeStone();
-        playerDisplay[index].transform.GetChild(0).GetComponent<Text>().text = "Stones : " + players[index].GetStonesLeft().ToString();
-
-        if (!isWhiteTurn)
-            firstTurn = false;
-    }
-
-    private void OffsetStonePosition(GameObject go)
-    {
-        go.transform.position += new Vector3(0, go.GetComponent<Renderer>().bounds.size.y / 2, 0);
-    }
-
-    //
-    private Vector3 GetSlotCenter(int x, int y)
-    {
-        Vector3 origin = Vector3.zero;
-        origin.x += x * GameManager.Instance.slotSize + (GameManager.Instance.slotSize / 2.0f);
-        origin.z += y * GameManager.Instance.slotSize + (GameManager.Instance.slotSize / 2.0f);
-        return origin;
-    }
-
-    //
-    private void NextTurn()
-    {
-        isWhiteTurn = !isWhiteTurn;
-        ResetCurrentStone();
-    }
-
-    //
-    public void ToggleCurrentStone()
-    {
-        if(!firstTurn)
-            currentStone = (StoneType)((int)currentStone + 1);
-
-        if((int)currentStone == 3)
+        // Calls search for roads with all tiles along two adjacent edges. If a road is found,
+        // a flag is set for the corresponding player.
+        for (int i = 0; i < GameManager.Instance.BoardSize; i++)
         {
-            currentStone = StoneType.Flat;
+            bool[,] explored = new bool[GameManager.Instance.BoardSize, GameManager.Instance.BoardSize];
+            
+            if (activeStones[i, 0].Count > 0 && SearchForRoads(i, 0, explored,
+                activeStones[i, 0][activeStones[i, 0].Count - 1].isWhite, true))
+            {
+                if (activeStones[i, 0][activeStones[i, 0].Count - 1].isWhite)
+                    whiteWin = true;
+                else
+                    blackWin = true;
+            }
+
+            explored = new bool[GameManager.Instance.BoardSize, GameManager.Instance.BoardSize];
+            
+            if (activeStones[0, i].Count > 0 && SearchForRoads(0, i, explored,
+                activeStones[0, i][activeStones[0, i].Count - 1].isWhite, false))
+            {
+                if (activeStones[0, i][activeStones[0, i].Count - 1].isWhite)
+                    whiteWin = true;
+                else
+                    blackWin = true;
+            }
         }
 
-        toggleStoneType.GetComponentInChildren<Text>().text = currentStone.ToString();  
+        // If a road is made for the current player, they win,
+        // if a road is made for the other player, they win,
+        // if someone is out of stones, FlatWin is called.
+        if ((IsWhite && whiteWin) || (!IsWhite && blackWin))
+        {
+            ShowVictoryScreen(IsWhite);
+        }
+        else if (blackWin || whiteWin)
+        {
+            ShowVictoryScreen(!IsWhite);
+        }
+        else if (players[0].NoStonesLeft() || players[1].NoStonesLeft())
+            FlatWin();
     }
-
-    private void ResetCurrentStone()
-    {
-        currentStone = StoneType.Flat;
-        toggleStoneType.GetComponentInChildren<Text>().text = currentStone.ToString();
-    }
-
-
     private void FlatWin()
     {
         int[] stoneCount = new int[2];
-        for(int i = 0; i < GameManager.Instance.boardSize; i++)
+        for (int i = 0; i < GameManager.Instance.BoardSize; i++)
         {
-            for(int j = 0; j < GameManager.Instance.boardSize; j++)
+            for (int j = 0; j < GameManager.Instance.BoardSize; j++)
             {
-                if(activeStones[i,j].Count > 0)
-                {
+                if (activeStones[i, j].Count > 0)
                     stoneCount[activeStones[i, j][activeStones[i, j].Count - 1].isWhite ? 0 : 1]++;
-                }
             }
         }
-        gameOver = true;
-        if(stoneCount[0] == stoneCount[1])
-        {
-            victoryScreen.GetComponent<Text>().text = "It's a Tie!";
-        }
+
+        if (stoneCount[0] == stoneCount[1])
+            ShowVictoryScreen(true, true);
         else
-        {
-            victoryScreen.GetComponent<Text>().text = players[stoneCount[0] > stoneCount[1] ? 0:1].GetName() + " has won the game!";
-        }
+            ShowVictoryScreen(stoneCount[0] > stoneCount[1]);
     }
-
-    private void CheckRoadWin()
-    {
-        for(int i = 0; i < GameManager.Instance.boardSize; i++)
-        {
-            if((activeStones[i, 0].Count > 0 &&
-                SearchForRoads(i, 0, new bool[GameManager.Instance.boardSize, GameManager.Instance.boardSize], activeStones[i, 0][activeStones[i, 0].Count - 1].isWhite, true)))
-            {
-                gameOver = true;
-                victoryScreen.GetComponent<Text>().text = players[activeStones[i, 0][activeStones[i, 0].Count - 1].isWhite ? 0 : 1].GetName() + " has won the game!";
-            }
-            else if((activeStones[0, i].Count > 0 &&
-                SearchForRoads(0, i, new bool[GameManager.Instance.boardSize, GameManager.Instance.boardSize], activeStones[0, i][activeStones[0, i].Count - 1].isWhite, false)))
-            {
-                gameOver = true;
-                victoryScreen.GetComponent<Text>().text = players[activeStones[i, 0][activeStones[0, i].Count - 1].isWhite ? 0 : 1].GetName() + " has won the game!";
-            }
-        }
-    }
-
-
     private bool SearchForRoads(int x, int y, bool[,] explored, bool isWhiteRoad, bool verticalSearch)
     {
-        if (activeStones[x, y].Count > 0)
-        {
-            Stone currentStone = activeStones[x, y][activeStones[x, y].Count - 1];
-            if (currentStone.isWhite == isWhiteRoad && currentStone.stoneType != StoneType.Standing)
-            {
-                if ((verticalSearch && y == 4) || (!verticalSearch && x == 4))
-                {
-                    return true;
-                }
-                else if (!explored[x, y])
-                {
-                    explored[x, y] = true;
+        if (activeStones[x, y].Count == 0 || explored[x, y])
+            return false;
 
-                    return (x < GameManager.Instance.boardSize - 1 && SearchForRoads(x + 1, y, explored, isWhiteRoad, verticalSearch))
-                        || (y < GameManager.Instance.boardSize - 1 && SearchForRoads(x, y + 1, explored, isWhiteRoad, verticalSearch))
-                        || (x > 1 && SearchForRoads(x - 1, y, explored, isWhiteRoad, verticalSearch))
-                        || (y > 1 && SearchForRoads(x, y - 1, explored, isWhiteRoad, verticalSearch));
-                }
+
+        Stone currentStone = activeStones[x, y][activeStones[x, y].Count - 1];
+        if (currentStone.isWhite != isWhiteRoad || currentStone.StoneType == StoneType.Standing)
+            return false;
+
+
+        if ((verticalSearch && y == (GameManager.Instance.BoardSize - 1)) || (!verticalSearch && x == (GameManager.Instance.BoardSize - 1)))
+            return true;
+
+
+        explored[x, y] = true;
+
+        return (x < GameManager.Instance.BoardSize - 1 && SearchForRoads(x + 1, y, explored, isWhiteRoad, verticalSearch))
+            || (y < GameManager.Instance.BoardSize - 1 && SearchForRoads(x, y + 1, explored, isWhiteRoad, verticalSearch))
+            || (x > 1 && SearchForRoads(x - 1, y, explored, isWhiteRoad, verticalSearch))
+            || (y > 1 && SearchForRoads(x, y - 1, explored, isWhiteRoad, verticalSearch));
+    }
+
+    private void ShowVictoryScreen(bool whiteWinner = true, bool tie = false)
+    {
+        victoryScreen.SetActive(true);
+        CurrentGameState = GameState.GAME_END;
+
+        if (tie)
+            victoryScreen.GetComponentInChildren<Text>().text = "It's a Tie!";
+        else
+        {
+            string winner;
+            if (Client.Instance)
+                winner = Client.Instance.players[whiteWinner ? 0 : 1].name;
+            else
+                winner = whiteWinner ? "White" : "Black";
+            victoryScreen.GetComponentInChildren<Text>().text = winner + " has won the game!";
+        }
+    }
+
+    private void SendSpawnStone()
+    {
+        if (currentStone != StoneType.Flat && !FirstTurn)
+            moveString.Add(currentStone == StoneType.Capstone ? 'C' : 'S');
+
+        moveString.Add((char)(MouseController.CurrentPosition.x + 'a'));
+        moveString.Add((char)(MouseController.CurrentPosition.y + '1'));
+        SendMove();
+    }
+    private void SendMove()
+    {
+        if (Client.Instance == false)
+        {
+            Debug.LogError("Sending a move when there is no client. Probably in a local game.");
+            return;
+        }
+        Client.Instance.Send("CMOV|" + new string(moveString.ToArray()));
+        Client.Instance.sentMove = true;
+        moveString = new List<char>();
+    }
+    public void TryMove(string fMoveString)
+    {
+        int index = 0;
+        int[] movingDir = new int[2];
+
+        if (fMoveString[index] == 'C' || fMoveString[index] == 'S')
+        {
+            currentStone = (fMoveString[index] == 'C') ? StoneType.Capstone : StoneType.Standing;
+            index++;
+        }
+        else if (fMoveString[index] >= '0' && fMoveString[index] <= '9')
+            pickedupStones = fMoveString[index++] - '0';
+        else
+            currentStone = StoneType.Flat;
+
+        moveStart.x = fMoveString[index++] - 'a';
+        moveStart.y = fMoveString[index++] - '1';
+
+        if (fMoveString.Length == index)
+        {
+            MouseController.CurrentPosition = moveStart;
+            
+
+            if (FirstTurn)
+            {
+                SpawnFirstStone();
+                FirstTurn = FirstTurn && isWhiteTurn;
+            }
+            else
+                SpawnStone();
+            NextTurn();
+            return;
+        }
+
+        if (pickedupStones == 0)
+            pickedupStones = 1;
+
+        char dir = fMoveString[index++];
+
+        movingDir[0] = (dir == '>') ? 1 : (dir == '<') ? -1 : 0;
+        movingDir[1] = (dir == '+') ? 1 : (dir == '-') ? -1 : 0;
+
+        selectedStones = activeStones[moveStart.x, moveStart.y].GetRange(
+            activeStones[moveStart.x, moveStart.y].Count - pickedupStones, 
+            pickedupStones);
+        
+        activeStones[moveStart.x, moveStart.y].RemoveRange(
+            activeStones[moveStart.x, moveStart.y].Count - pickedupStones,
+            pickedupStones);
+
+        if (index == fMoveString.Length)
+        {
+            fMoveString += "1";
+        }
+
+
+        for (int i = index; i < fMoveString.Length; i++)
+        {
+            moveStart.x += movingDir[0];
+            moveStart.y += movingDir[1];
+            for (int j = fMoveString[index] - '0'; j > 0; j--)
+            {
+                activeStones[moveStart.x, moveStart.y].Add(selectedStones[0]);
+
+                selectedStones[0].SetPosition(moveStart, activeStones[moveStart.x, moveStart.y].Count -1);
+
+                Flatten(moveStart);
+
+                selectedStones.RemoveAt(0);
             }
         }
-        return false;
+        
+        NextTurn();
     }
 }

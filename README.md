@@ -13,12 +13,17 @@ The rules can be found here: http://cheapass.com/wp-content/uploads/2016/05/TakW
 Reddit: https://www.reddit.com/r/Tak/
 PTN: https://www.reddit.com/r/Tak/wiki/portable_tak_notation
 
-
-Edit:
- Version C++
+ Unity Version
+ Currently works as a local game with a 5x5 board and the official rules. A server
+ will (hopefully) be up soon so that the game can be run online!
  
- I decided to drop the C implementation and do it in C++ instead, so this is the main version. 
- It is currently finished, but there might be errors that need fixing, or things that get ironed 
+ Here are some pictures!
+ [Beginning of game image](\Screenshots\StartGameScreen.PNG)
+ [Middle of game image](\Screenshots\OngoingGameScreen.PNG)
+ [End of game image](\Screenshots\EndGameScreen.PNG)
+
+ Version C++ 
+ Currently finished, but there might be errors that need fixing, or things that get ironed 
  out in the future.
  
  You might need to change the makefile to suit your compiler.

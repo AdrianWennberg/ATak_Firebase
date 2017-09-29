@@ -16,7 +16,7 @@ public class BoardHighlights : MonoBehaviour {
         hightlights = new List<GameObject>();
     }
 
-    private GameObject GetHighlightObject(float slotSize)
+    private GameObject GetHighlightObject()
     {
         GameObject go = hightlights.Find(g => !g.activeSelf);
 
@@ -24,13 +24,12 @@ public class BoardHighlights : MonoBehaviour {
         {
             go = Instantiate(HighlightPrefab);
             hightlights.Add(go);
-            go.transform.localScale *= slotSize;
         }
 
         return go;
     }
 
-    public void HighlightAllowedMoves(bool[,] moves, int boardSize, float slotSize)
+    public void HighlightAllowedMoves(bool[,] moves, int boardSize)
     {
         for (int i = 0; i < boardSize; i++)
         {
@@ -38,8 +37,8 @@ public class BoardHighlights : MonoBehaviour {
             {
                 if(moves[i,j])
                 {
-                    GameObject go = GetHighlightObject(slotSize);
-                    go.transform.position = new Vector3((i + 0.5f) * slotSize, 0, (j + 0.5f) * slotSize);
+                    GameObject go = GetHighlightObject();
+                    go.transform.position = new Vector3((i + 0.5f), 0.001f, (j + 0.5f));
                     
                     go.SetActive(true);
                 }
