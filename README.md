@@ -20,7 +20,7 @@ PTN: https://www.reddit.com/r/Tak/wiki/portable_tak_notation
  Here are some pictures!
  ![Beginning of game image](/Screenshots/StartGameState.PNG)
  ![Middle of game image](/Screenshots/OngoingGameState.PNG)
- ![End of game image](/Screenshots/EndGameState.PNG)
+ ![End of game image](/Screenshots/VictoryGameState.PNG)
 
  Version C++ 
  Currently finished, but there might be errors that need fixing, or things that get ironed 
