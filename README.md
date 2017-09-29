@@ -18,9 +18,9 @@ PTN: https://www.reddit.com/r/Tak/wiki/portable_tak_notation
  will (hopefully) be up soon so that the game can be run online!
  
  Here are some pictures!
- [Beginning of game image](\Screenshots\StartGameScreen.PNG)
- [Middle of game image](\Screenshots\OngoingGameScreen.PNG)
- [End of game image](\Screenshots\EndGameScreen.PNG)
+ [Beginning of game image](/Screenshots/StartGameState.PNG)
+ [Middle of game image](/Screenshots/OngoingGameState.PNG)
+ [End of game image](/Screenshots/EndGameState.PNG)
 
  Version C++ 
  Currently finished, but there might be errors that need fixing, or things that get ironed 
