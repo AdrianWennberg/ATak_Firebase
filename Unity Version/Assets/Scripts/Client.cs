@@ -12,7 +12,7 @@ public class Client : MonoBehaviour
     public string clientName;
     public bool isWhite;
 
-    private bool socketReady;
+    public bool SocketReady { get; private set; }
     private TcpClient socket;
     private NetworkStream stream;
     private StreamWriter writer;
@@ -31,9 +31,10 @@ public class Client : MonoBehaviour
 
         DontDestroyOnLoad(gameObject);
     }
+
     private void Update()
     {
-        if (socketReady && stream.DataAvailable)
+        if (SocketReady && stream.DataAvailable)
         {
             string data = reader.ReadLine();
             if (data != null)
@@ -44,7 +45,7 @@ public class Client : MonoBehaviour
 
     public bool ConnectToServer(string host, int port)
     {
-        if (socketReady)
+        if (SocketReady)
             return false;
 
         try
@@ -54,21 +55,21 @@ public class Client : MonoBehaviour
             writer = new StreamWriter(stream);
             reader = new StreamReader(stream);
 
-            socketReady = true;
+            SocketReady = true;
         }
         catch(Exception e)
         {
             Debug.Log("Socket error: " + e.Message);
         }
 
-        return socketReady;
+        return SocketReady;
     }
     
 
     // Sending messages to the server
     public void Send(string data)
     {
-        if (socketReady == false)
+        if (SocketReady == false)
         {
             Debug.LogError("Send error: tried to send data when the socket was not ready. Probably not connected to server.");
             return;
@@ -94,6 +95,8 @@ public class Client : MonoBehaviour
             case "SCNN":
                 UserConnected(aData[1], aData[2] == "1");
                 break;
+            case "SLIST":
+                break;
             case "SMOV":
                 if (sentMove)
                     sentMove = false;
@@ -114,7 +117,6 @@ public class Client : MonoBehaviour
 
         if(players.Count == 2)
         {
-            GameManager.Instance.StartGame();
         }
     }
 
@@ -128,14 +130,14 @@ public class Client : MonoBehaviour
     }
     private void CloseSocket()
     {
-        if (!socketReady)
+        if (!SocketReady)
             return;
 
         writer.Close();
         reader.Close();
         stream.Close();
         socket.Close();
-        socketReady = false;
+        SocketReady = false;
 
     }
 }

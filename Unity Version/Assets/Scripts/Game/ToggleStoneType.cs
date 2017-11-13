@@ -32,6 +32,9 @@ public class ToggleStoneType : MonoBehaviour
             {
                 currentType = hit.collider.gameObject;
                 BoardManager.Instance.currentStone = (StoneType)Array.IndexOf(StoneTypes, currentType);
+                if (BoardManager.Instance.currentStone == StoneType.Capstone &&
+                    BoardManager.Instance.players[BoardManager.Instance.IsWhite ? 0 : 1].HasCapstone() == false)
+                    BoardManager.Instance.currentStone = StoneType.Flat;
             }
         }
     }
