@@ -1,4 +1,7 @@
-# ATak
+# ATak with Firebase
+This is a clone of the original ATak repo for testing with Firebase. The original can be found here:
+https://github.com/AdrianWennberg/ATak/
+
 An attempt at implementing the TAK board game. Starting of as a text based C implementation, 
 then moving on to unity or another such engine.
 
